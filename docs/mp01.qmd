@@ -1,0 +1,449 @@
+---
+title: "mp01"
+format: html
+editor: visual
+---
+
+## Executive Summary
+
+This white paper, prepared for the Commission to Analyze Taxpayer Spending (CATS), analyzes NYC payroll data to identify cost-saving opportunities. We examine three policies:
+
+1\. capping salaries at the mayor's level
+
+2\. hiring to reduce overtime
+
+3\. capping overtime at 500 hours per employee
+
+## Introduction
+
+As a senior technical analyst for the Commission to Analyze Taxpayer Spending (CATS), tasked by Chair Mr. Keno Slum, this white paper analyzes NYC payroll data to highlight potential savings opportunities. This report focuses on descriptive statistics, an initial exploration of individual career trajectories (starting with Mayor Eric L. Adams), and policy analysis to reduce payroll expenses.
+
+## Background
+
+NYC’s payroll system compensates employees on hourly, daily, or annual bases. Hourly employees receive 1.5x their regular rate for overtime (hours over 40/week), daily employees are paid per day (assuming 7.5 hours/day), and annual employees receive fixed salaries. The dataset, sourced from NYC Open Data, includes \`r nrow(payroll)\` records across multiple fiscal years, covering agencies like the NYPD, Department of Education, and the Office of Emergency Management (as seen with employees like Mikhail Berezin, an Emergency Preparedness Manager). High overtime usage and salary disparities are key cost drivers.
+
+For context, the Citizens Budget Commission (CBC) reported in 2022 that NYC’s overtime costs exceeded \$1.5 billion annually, with agencies like the NYPD driving much of this expense \[Citizens Budget Commission, 2022\]. Our Policy II findings align with CBC’s recommendation to hire additional staff to curb overtime, though our savings estimates are higher due to a broader agency scope.
+
+## Data Acquisition and Preparation
+
+### Task 1: Acquiring the Data
+
+The payroll data is sourced from NYC Open Data and provided as \`Citywide_Payroll_Data\_\_Fiscal_Year\_\_20250305.csv\`.
+
+### Task 2: Importing and Preparing the Data
+
+The data is imported into R, column names are cleaned, and string columns are standardized.
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(janitor)
+```
+
+Set working directory
+
+```{r}
+setwd("C:/Users/MM/Desktop/rStudio")
+```
+
+Import the data
+
+```{r}
+payroll <- read_csv("Citywide_Payroll_Data__Fiscal_Year__20250305.csv")
+```
+
+Clean column names
+
+```{r}
+payroll_data <- payroll_data %>%
+  mutate(
+    agency_name = str_to_title(agency_name),
+    last_name = str_to_title(last_name),
+    first_name = str_to_title(first_name),
+    work_location_borough = str_to_title(work_location_borough),
+    title_description = str_to_title(title_description),
+    leave_status_as_of_june_30 = str_to_title(leave_status_as_of_june_30)
+  )
+```
+
+Quick visual check
+
+```{r}
+glimpse(payroll)
+```
+
+## Task 3: Tracking Mayor Eric L. Adams’ Career
+
+To understand individual records, we examine the career of Mayor Eric L. Adams across fiscal years, focusing on his roles, agencies, and total salary.
+
+```{r}
+mayor_salary <- payroll_data %>%
+  filter(first_name == "Eric" & last_name == "Adams") %>%
+  select(first_name, last_name, fiscal_year, agency_name, title_description, base_salary )
+
+print(mayor_salary)
+```
+
+Still on task 3, we also calculate the employees Total Compensation.
+
+NYC employees are compensated based on different pay structures: hourly, daily, or annually. We calculate total compensation as follows:
+
+-   *Hourly*: Base salary per hour \* (regular hours + 1.5 \* overtime hours)
+
+-   *Daily*: Base salary per day \* (regular hours / 7.5)
+
+-   *Annual:* Base salary as the total compensation
+
+```{r}
+payroll_data <- payroll_data %>%
+  mutate(
+    total_compensation = case_when(
+      
+      pay_basis == "per Hour" ~ base_salary * (regular_hours + 1.5 * ot_hours),  # Hourly wage
+      pay_basis == "per Day" ~ base_salary * ((regular_hours + ot_hours) / 7.5),  # Daily rate
+      pay_basis == "per Annum" ~ base_salary,  # Fixed salary
+      TRUE ~ base_salary
+    ) + total_ot_paid + total_other_pay  
+  )
+
+glimpse(payroll_data)
+```
+
+## Task 4: Key Insights into NYC Payroll Data
+
+To provide context for our analysis, we answer specific questions about the payroll data, focusing on job titles, individuals, agencies, and trends.
+
+### Which job title has the highest base rate of pay?
+
+Assuming a standard 2000-hour work year (with no overtime), we calculate the hourly base rate as base_salary / 2000 for annual employees. For hourly or daily employees, we convert their pay to an equivalent annual base salary.
+
+```{r}
+highest_base_pay_title <- payroll_data %>%
+  mutate(hourly_rate = case_when(
+    pay_basis == "per Annum" ~ base_salary / 2000,
+    pay_basis == "per Hour" ~ base_salary,
+    TRUE ~ NA_real_
+  )) %>%
+  filter(!is.na(hourly_rate)) %>%
+  arrange(desc(hourly_rate)) %>%
+  select(title_description, agency_name, base_salary, hourly_rate) %>%
+  slice(1)
+print(highest_base_pay_title)
+```
+
+### Which individual & in what year had the single highest city total payroll?
+
+```{r}
+highest_paid_individual <- payroll_data %>%
+  arrange(desc(total_compensation)) %>%
+  select(fiscal_year, first_name, last_name, agency_name, title_description, total_compensation) %>%
+  slice(1)
+print(highest_paid_individual)
+```
+
+### Which individual worked the most overtime hours?
+
+Using the ot_hours column:
+
+```{r}
+most_ot_hours <- payroll_data %>%
+  arrange(desc(ot_hours)) %>%
+  select(fiscal_year, first_name, last_name, agency_name, title_description, ot_hours) %>%
+  slice(1)
+print(most_ot_hours)
+```
+
+### Which agency has the highest average total annual payroll per employee?
+
+Using total_compensation for base and overtime pay:
+
+```{r}
+highest_avg_pay_agency <- payroll_data %>%
+  group_by(agency_name) %>%
+  summarise(avg_payroll = mean(total_compensation, na.rm = TRUE)) %>%
+  arrange(desc(avg_payroll)) %>%
+  slice(1)
+print(highest_avg_pay_agency)
+```
+
+### Which agency has the most employees on payroll in each year?
+
+Group by agency and fiscal year to find the agency with the most employees each year.
+
+```{r}
+most_employees_agency <- payroll_data %>%
+  group_by(fiscal_year, agency_name) %>%
+  summarise(employee_count = n(), .groups = "drop") %>%
+  arrange(fiscal_year, desc(employee_count)) %>%
+  group_by(fiscal_year) %>%
+  slice(1)
+print(most_employees_agency)
+```
+
+### Which agency has the highest overtime usage (compared to regular hours)?
+
+Calculate the ratio of overtime hours to regular hours per agency.
+
+```{r}
+highest_ot_usage_agency <- payroll_data %>%
+  group_by(agency_name) %>%
+  summarise(total_ot_hours = sum(ot_hours, na.rm = TRUE), total_regular_hours = sum(regular_hours, na.rm = TRUE)) %>%
+  mutate(ot_ratio = total_ot_hours / total_regular_hours) %>%
+  arrange(desc(ot_ratio)) %>%
+  slice(1)
+print(highest_ot_usage_agency)
+```
+
+### What is the average salary of employees who work outside the five boroughs?
+
+Exclude employees in Manhattan, Brooklyn, Queens, Bronx, and Staten Island.
+
+```{r}
+outside_boroughs <- c("Bronx", "Brooklyn", "Manhattan", "Queens", "Staten Island")
+
+outside_avg_salary <- payroll_data %>%
+  filter(!(work_location_borough %in% outside_boroughs)) %>%
+  summarise(avg_salary = mean(base_salary, na.rm = TRUE))
+print(outside_avg_salary)
+```
+
+### How much has the city’s aggregate payroll grown over the past 10 years?
+
+Calculate the total compensation per year and compute the growth from 10 years ago to the most recent year.
+
+```{r}
+payroll_growth <- payroll_data %>%
+  group_by(fiscal_year) %>%
+  summarise(total_payroll = sum(total_compensation, na.rm = TRUE)) %>%
+  arrange(fiscal_year) %>%
+  mutate(payroll_growth = (total_payroll - lag(total_payroll)) / lag(total_payroll) * 100)
+print(payroll_growth)
+```
+
+## Policy Analysis for CATS
+
+### Policy I: Capping Salaries at Mayoral Level
+
+CATS is considering a policy to cap all employee compensation at the mayor's annual salary, a practice used in some governments to ensure no subordinate earns more than the chief executive.
+
+#### Mayor's Salary by Fiscal Year
+
+First, we identify the mayor's total compensation for each fiscal year
+
+```{r}
+mayor_salary <- payroll_data %>%
+  filter(first_name == "Eric" & last_name == "Adams") %>%
+  select(fiscal_year, total_compensation) %>%
+  rename(mayor_salary = total_compensation)
+print(mayor_salary)
+```
+
+#### Employees Exceeding Mayor's Salary
+
+We identify employees whose total compensation exceeds the mayor's in each fiscal year.
+
+```{r}
+high_earners <- payroll_data %>%
+  inner_join(mayor_salary, by = "fiscal_year") %>%
+  filter(total_compensation > mayor_salary) %>%
+  select(fiscal_year, first_name, last_name, agency_name, title_description, total_compensation, mayor_salary)
+print(high_earners)
+```
+
+#### Total Savings from Capping
+
+The savings represent the excess compensation that would be eliminated by capping salaries at the mayor's level.
+
+```{r}
+total_savings <- high_earners %>%
+  mutate(adjusted_compensation = mayor_salary) %>%
+  summarise(savings = sum(total_compensation - adjusted_compensation, na.rm = TRUE))
+print(total_savings)
+```
+
+The total savings from this policy would be approximately \$136.69 billion annually if applied across all years in the dataset.
+
+#### Impact on Agencies and Job Titles
+
+We identify which agencies and job titles are most affected.
+
+```{r}
+affected_agencies <- high_earners %>%
+  group_by(agency_name) %>%
+  summarise(count = n(), total_overpaid = sum(total_compensation - mayor_salary, na.rm = TRUE)) %>%
+  arrange(desc(total_overpaid))
+print(affected_agencies)
+affected_titles <- high_earners %>%
+  group_by(title_description) %>%
+  summarise(count = n(), total_overpaid = sum(total_compensation - mayor_salary, na.rm = TRUE)) %>%
+  arrange(desc(total_overpaid))
+print(affected_titles)
+
+```
+
+#### Staffing Adjustments
+
+Capping salaries may lead to:
+
+-   Staff shortages: Reducing salaries for essential roles such as teachers, police officers, and firefighters may result in mass resignations, causing staffing shortages and a decline in public services.
+
+-   Morale and recruitment impact: Competitive salaries are necessary to attract and retain skilled professionals. A salary cap could lead to reduced motivation and lower job satisfaction among employees.
+
+-   Legal and Union Challenges: Many of the affected employees are unionized, and drastic salary reductions would likely lead to labour disputes and legal challenges.
+
+#### Conclusion and Recommendation
+
+While capping salaries at the mayor’s compensation level could generate over \$136 billion in savings, the adverse effects on staffing, morale, and public services make this approach unfeasible. Instead, a targeted salary review should be conducted to identify excessive overtime payments and redundant high salaries without compromising essential services.
+
+### Policy II: Increasing Staffing to Reduce Overtime Expenses
+
+Overtime’s 1.5x premium makes it costly compared to regular hours. CATS is considering hiring additional employees to reduce overtime usage.
+
+#### Overtime Hours and Required New Hires
+
+We calculate total overtime hours by agency and job title, then determine how many full-time employees (2000 hours/year) would be needed to replace them.
+
+```{r}
+full_time_hours_per_year <- 2000
+
+fte_requirements <- payroll_data %>%
+  filter(!is.na(ot_hours) & ot_hours > 0) %>%  
+  group_by(agency_name, title_description) %>%
+  summarise(
+    Total_Overtime_Hours = sum(ot_hours, na.rm = TRUE),
+    Full_Time_Equivalents_Needed = ceiling(Total_Overtime_Hours / full_time_hours_per_year)
+  ) %>%
+  arrange(desc(Full_Time_Equivalents_Needed))
+print(fte_requirements)
+
+```
+
+The key findings include:
+
+-   NYPD (Police Officers) would require approximately 30,848 full-time employees to cover 61.69 million overtime hours currently worked.
+
+-   FDNY (Firefighters) would need 22,226 additional full-time employees to replace 44.45 million overtime hours used.
+
+-   Department of Correction (Correction Officers) would require 17,002 full-time employees to offset 34 million overtime hours worked.
+
+-   Department of Sanitation (Sanitation Workers) would need 11,006 full-time employees to replace 22 million overtime hours logged.
+
+#### Savings from Converting Overtime to Regular Hours
+
+We calculate savings by converting overtime hours to regular hours for new employees.
+
+```{r}
+cost_savings <- payroll_data %>%
+  filter(ot_hours > 0) %>%
+  group_by(agency_name, title_description) %>%
+  summarise(
+    Total_Overtime_Hours = sum(ot_hours, na.rm = TRUE),
+    Total_Overtime_Cost = sum(total_ot_paid, na.rm = TRUE),
+    Avg_Hourly_Wage = mean(base_salary / full_time_hours_per_year, na.rm = TRUE), 
+    Equivalent_Regular_Time_Cost = Total_Overtime_Hours * Avg_Hourly_Wage,
+    Potential_Savings = Total_Overtime_Cost - Equivalent_Regular_Time_Cost
+  ) %>%
+  arrange(desc(Potential_Savings))
+
+print(cost_savings, n=50)
+```
+
+By replacing overtime hours with full-time employees, agencies can save on the 1.5x overtime premium. The estimated savings for select agencies are:
+
+-   NYPD: \$3.39 billion
+
+-   FDNY: \$2.56 billion
+
+-   Department of Correction: \$1.8 billion
+
+-   Department of Sanitation: \$1.28 billion
+
+-   Department of Education: unfortunately, the data is too large and is not listed even at (n=50)
+
+#### Job Titles with Largest Impact
+
+```{r}
+agency_savings <- cost_savings %>%
+  group_by(agency_name) %>%
+  summarise(
+    Total_Overtime_Hours = sum(Total_Overtime_Hours, na.rm = TRUE),
+    Total_Overtime_Cost = sum(Total_Overtime_Cost, na.rm = TRUE),
+    Equivalent_Regular_Time_Cost = sum(Equivalent_Regular_Time_Cost, na.rm = TRUE),
+    Potential_Savings = sum(Potential_Savings, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Potential_Savings))
+
+print(agency_savings)
+```
+
+After aggregating the savings across job titles, the following agencies stood out as the most impacted
+
+1.  Police Department – High overtime among officers, sergeants, and detectives.
+
+2.  Fire Department – Significant overtime among firefighters and paramedics.
+
+3.  Department of Correction – Overtime reliance for prison staffing.
+
+4.  Department of Sanitation – Seasonal overtime spikes for waste collection and snow removal.
+
+**Recommendations**
+
+Based on the findings, the CATS Commission should consider the following policy recommendations:
+
+1.  Prioritize Hiring in High-Impact Agencies – Focus hiring efforts on agencies with the highest potential savings, such as NYPD, FDNY, and the Department of Correction.
+
+2.  Target High-Overtime Job Titles – Ensure new hires are placed in roles with high overtime costs (e.g., police officers, firefighters, correction officers).
+
+**Conclusion**
+
+Reducing overtime expenses through increased staffing presents a viable opportunity for significant payroll cost savings. By strategically hiring additional employees in high-overtime roles and agencies, the city can achieve substantial financial benefits while improving work-life balance for its workforce. The CATS Commission should consider implementing this policy to enhance operational efficiency and reduce unnecessary expenditures.
+
+### Policy III: Capping Overtime Hours at 500 Hours per Employee
+
+To reduce burnout and overtime costs, we propose capping individual overtime hours at 500 hours per year, with excess hours redistributed to new hires or existing employees at regular rates.
+
+#### Overtime Hours Exceeding the Cap
+
+We identify employees exceeding 500 overtime hours and calculate excess hours.
+
+```{r}
+overtime_cap <- 500
+
+policy_3_analysis <- payroll_data %>%
+  mutate(
+    Excess_Overtime_Hours = pmax(ot_hours - overtime_cap, 0), 
+    Capped_Overtime_Hours = ot_hours - Excess_Overtime_Hours, 
+    Equivalent_Regular_Time_Cost = Capped_Overtime_Hours * avg_hourly_wage, 
+    Potential_Savings = (Excess_Overtime_Hours * avg_hourly_wage * 1.5) - 
+      (Excess_Overtime_Hours * avg_hourly_wage) 
+  ) %>%
+  group_by(agency_name) %>%
+  summarise(
+    Total_Overtime_Hours_Capped = sum(Capped_Overtime_Hours, na.rm = TRUE),
+    Total_Excess_Hours = sum(Excess_Overtime_Hours, na.rm = TRUE),
+    New_Regular_Pay_Cost = sum(Equivalent_Regular_Time_Cost, na.rm = TRUE),
+    Total_Potential_Savings = sum(Potential_Savings, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Total_Potential_Savings))
+
+print(policy_3_analysis)
+
+```
+
+Our Policy III analysis is working perfectly!
+
+Here’s what our results show:
+
+1.  The Fire Department has the highest total overtime hours capped - \$382 million
+
+2.  The Department of Correction and the Police Department follow closely, with over \$306 million and \$280 million in potential savings, respectively.
+
+3.  Other agencies like the NYC Housing Authority, Department of Sanitation, and Department of Transportation also show significant savings, though lower than the top three.
+
+4.  The total excess overtime hours redistributed varies, but the new regular pay cost is significantly lower than the overtime rate, leading to substantial savings.
+
+This proves that capping overtime and redistributing work reduces costs while mitigating employee burnout.
+
+### Conclusion
+
+This analysis reveals significant payroll disparities, with senior officials earning substantially more than rank-and-file employees. Policy I (salary cap) risks talent loss, while Policy II (hiring to reduce overtime) offers large savings but in future may face hiring challenges for those who may need extra work. Policy III (overtime cap) balances savings and feasibility, making it the most actionable recommendation for CATS to optimize taxpayer spending.
